@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DYMAT Labs Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
+
+<style>
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+#map {
+  height: 100vh;
+  margin-right: 300px;
+}
+
+#sidebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 300px;
+  height: 100vh;
+  background: white;
+  z-index: 1000;
+  overflow-y: auto;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+  font-size: 14px;
+}
+
+#sidebar-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2000;
+  padding: 8px 12px;
+  font-size: 18px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#filters {
+  margin-top: 10px;
+  column-count: 1;
+  column-gap: 10px;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* two columns */
+  gap: 6px 12px;
+  margin-top: 5px;
+}
+
+/* MOBILE BEHAVIOR */
+@media (max-width: 768px) {
+  #sidebar {
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+  }
+
+  #sidebar.open {
+    transform: translateX(0);
+  }
+
+  #map {
+    margin-right: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-grid {
+    grid-template-columns: 1fr 1fr; /* two columns */
+  }
+}
+
+/* HEADER (STATIC) */
+#sidebar-header {
+  position: sticky;
+  top: 0;
+  background: white;
+  padding: 10px;
+  z-index: 10;
+  border-bottom: 1px solid #eee;
+}
+
+#counter {
+  text-align: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #555;
+}
+
+#search {
+  display: block;
+  margin: 8px auto 0 auto;
+  width: 90%;
+  text-align: center;
+}
+
+/* LIST (DYNAMIC ONLY) */
+#sidebar-list {
+  padding: 10px;
+}
+
+.lab-item {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+}
+
+.lab-item:hover {
+  background: #f5f5f5;
+}
+
+.lab-item.active {
+  background: #dff3ff;
+  border-left: 4px solid #2c7be5;
+}
+</style>
+</head>
+
+<body>
+
+<button id="sidebar-toggle">☰</button>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <div style="text-align:center;">
+  <img src="icons/dymat.png" style="width:140px;">
+  
+  <div style="
+    font-size:11px;
+    color:#888;
+    margin-top:6px;
+    line-height:1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  ">
+    Map created within the framework of <br>the <b>CATALYST project</b>
+
+   <!-- For later: Map created within the framework of the 
+<a href="https://your-project-link.com" target="_blank">CATALYST project</a> -->
+  </div>
+</div>
+
+
+
+    <input id="search" type="text" placeholder="Search lab...">
+
+    <div id="filters" style="margin-top:10px;">
+
+  <!-- RESEARCH -->
+  <div class="filter-column">
+
+    <b>Research</b>
+
+    <div class="filter-grid">
+      <label><input type="checkbox" value="impact"> Impact</label>
+      <label><input type="checkbox" value="blast"> Blast</label>
+      <label><input type="checkbox" value="ballistics"> Ballistics</label>
+      <label><input type="checkbox" value="fracture"> Fracture</label>
+      <label><input type="checkbox" value="metals"> Metals</label>
+      <label><input type="checkbox" value="ceramics"> Ceramics</label>
+      <label><input type="checkbox" value="polymers"> Polymers</label>
+      <label><input type="checkbox" value="composites"> Composites</label>
+      <label><input type="checkbox" value="architected"> Architected</label>
+    </div>
+
+  </div>
+
+  <br>
+
+  <!-- EQUIPMENT -->
+  <div class="filter-column">
+
+    <b>Equipment</b>
+
+    <div class="filter-grid">
+      <label><input type="checkbox" value="shpb"> SHPB</label>
+      <label><input type="checkbox" value="gas gun"> Gas gun</label>
+      <label><input type="checkbox" value="plate impact"> Plate Impact</label>
+      <label><input type="checkbox" value="mid-range speed"> Medium rate</label>
+    </div>
+
+  </div>
+
+</div>
+
+    <div id="counter"></div>
+  </div>
+
+  <div id="sidebar-list"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
+<script>
+
+// ==========================
+// MAP
+// ==========================
+//Set a fixed center + zoom when slaunching the map 
+// Right now, centered on European Union
+const map = L.map('map').setView([50.5, 10.0], 4);
+
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// ==========================
+// DATA
+// ==========================
+let labs = [];
+let activeMarker = null;
+const markersById = {};
+const expandedCountries = {};
+
+// ==========================
+// MARKERS
+// ==========================
+const markersLayer = L.markerClusterGroup({
+  maxClusterRadius: 80,
+  disableClusteringAtZoom: 7
+});
+map.addLayer(markersLayer);
+
+// ==========================
+// ICONS
+// ==========================
+const expIcon = L.icon({ iconUrl: 'icons/gears.png', iconSize: [30, 30] });
+const highlightIcon = L.icon({ iconUrl: 'icons/placeholder.png', iconSize: [40, 40] });
+
+function getIcon(lab) {
+  return expIcon;
+}
+
+// ==========================
+// FILTER CHECK
+// ==========================
+function labMatchesFilters(lab) {
+  const checked = Array.from(document.querySelectorAll('#filters input:checked'))
+    .map(cb => cb.value.toLowerCase());
+
+  if (checked.length === 0) return true;
+
+  const research = lab.research?.map(r => r.toLowerCase()) || [];
+  const equipment = lab.equipment?.map(e => e.toLowerCase()) || [];
+
+  return checked.every(f => research.includes(f) || equipment.includes(f));
+}
+
+// ==========================
+// SIDEBAR RENDER (ONLY LIST)
+// ==========================
+
+const sidebar = document.getElementById("sidebar");
+const toggle = document.getElementById("sidebar-toggle");
+
+toggle.addEventListener("click", () => {
+  sidebar.classList.toggle("open");
+});
+
+function renderSidebar(query = "") {
+
+  const listContainer = document.getElementById("sidebar-list");
+  const q = query.toLowerCase();
+
+  const filtered = labs.filter(lab => {
+
+    if (!labMatchesFilters(lab)) return false;
+
+    const searchText =
+      (lab.name || "").toLowerCase() +
+      " " +
+      (lab.city || "").toLowerCase() +
+      " " +
+      (lab.country || "").toLowerCase() +
+      " " +
+      (lab.institution || "").toLowerCase() +
+      " " +
+      (lab.research || []).join(" ").toLowerCase() +
+      " " +
+      (lab.equipment || []).join(" ").toLowerCase() +
+      " " +
+      (lab.people || []).join(" ").toLowerCase();
+
+    return searchText.includes(q);
+  });
+  document.getElementById("counter").innerText =
+    `${filtered.length} labs shown / ${labs.length} total`;
+
+  const grouped = {};
+  filtered.forEach(lab => {
+    const country = lab.country || "Unknown";
+    if (!grouped[country]) grouped[country] = [];
+    grouped[country].push(lab);
+  });
+
+  listContainer.innerHTML = "";
+
+  Object.keys(grouped)
+  .sort()
+  .forEach(country => {
+
+    const isOpen = expandedCountries[country] !== false;
+    const count = grouped[country].length;
+
+    // SORT LABS ALPHABETICALLY INSIDE COUNTRY
+    grouped[country].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+
+    const header = document.createElement("div");
+    header.style.padding = "8px";
+    header.style.fontWeight = "bold";
+    header.style.background = "#f0f0f0";
+    header.style.cursor = "pointer";
+    header.innerText = `${isOpen ? "▼" : "▶"} ${country} (${count})`;
+
+    header.onclick = () => {
+      expandedCountries[country] = !isOpen;
+      renderSidebar(document.getElementById("search").value);
+    };
+
+    listContainer.appendChild(header);
+
+    if (!isOpen) return;
+
+    grouped[country].forEach(lab => {
+
+      const div = document.createElement("div");
+      div.className = "lab-item";
+      div.dataset.id = lab.id;
+
+      div.innerHTML = `<b>${lab.name}</b><br>${lab.city}, ${lab.country}`;
+
+
+
+
+      div.onclick = () => {
+  const marker = markersById[lab.id];
+  if (!marker) return;
+
+  map.flyTo([lab.lat, lab.lng], 8, { duration: 1.2 });
+
+  const openPopupWhenReady = () => {
+    markersLayer.zoomToShowLayer(marker, () => {
+      marker.openPopup();
+      setActive(lab.id);
+
+      // ✅ CLOSE SIDEBAR ON MOBILE
+      if (window.innerWidth < 768) {
+        document.getElementById("sidebar").classList.remove("open");
+      }
+    });
+
+    map.off("zoomend", openPopupWhenReady);
+  };
+
+  map.on("zoomend", openPopupWhenReady);
+};
+
+      listContainer.appendChild(div);
+    });
+  });
+}
+
+// ==========================
+// ACTIVE MARKER
+// ==========================
+function setActive(id) {
+
+  if (activeMarker) {
+    const prev = labs.find(l => l.id == activeMarker._labId);
+    if (prev) activeMarker.setIcon(getIcon(prev));
+  }
+
+  document.querySelectorAll(".lab-item").forEach(el => {
+    el.classList.toggle("active", el.dataset.id == id);
+  });
+
+  const marker = markersById[id];
+
+  if (marker) {
+    marker.setIcon(highlightIcon);
+    activeMarker = marker;
+  }
+}
+
+// ==========================
+// MARKERS RENDER
+// ==========================
+function renderMarkers() {
+  markersLayer.clearLayers();
+
+  labs.forEach(lab => {
+
+  if (!labMatchesFilters(lab)) return;
+    const marker = L.marker([lab.lat, lab.lng], {
+      icon: getIcon(lab)
+    });
+
+    marker._labId = lab.id;
+
+    marker.bindPopup(`
+      <div style="font-size:13px; line-height:1.4;">
+
+        <b>${lab.name}</b><br>
+        ${lab.institution}<br>
+        ${lab.city}, ${lab.country}
+
+        <hr>
+
+        <b>Research:</b><br>
+        ${lab.research?.join(", ") || "—"}<br><br>
+
+        <b>Equipment:</b><br>
+        ${lab.equipment?.join(", ") || "—"}<br><br>
+
+        <b>People:</b><br>
+        ${lab.people?.map(p => `• ${p}`).join("<br>") || "—"}<br><br>
+
+        <b>Contacts:</b><br>
+        ${
+          lab.contacts?.length
+            ? lab.contacts.map(c => `
+                <div style="margin-bottom:10px;">
+                  <b>${c.name}</b><br>
+                  ${c.role ? c.role + "<br>" : ""}
+                  ${c.email ? `
+                    ${c.email}<br>
+                    <button class="copy-btn" data-email="${c.email}"
+                      style="
+                        margin-top:4px;
+                        padding:4px 8px;
+                        font-size:12px;
+                        border:1px solid #ccc;
+                        border-radius:5px;
+                        cursor:pointer;
+                        background:#f7f7f7;
+                      ">
+                      Copy email
+                    </button>
+                  ` : ""}
+                </div>
+              `).join("")
+            : "No contact person listed"
+        }
+
+        <hr>
+
+        <a href="${lab.website}" target="_blank">🔗 Website</a>
+
+      </div>
+    `);
+
+    marker.on("click", () => setActive(lab.id));
+
+    markersById[lab.id] = marker;
+    markersLayer.addLayer(marker);
+  });
+}
+
+// ==========================
+// EVENTS (CLEAN & STABLE)
+// ==========================
+
+// SEARCH (FIXED - NEVER RECREATED)
+document.addEventListener("input", (e) => {
+  if (e.target.id === "search") {
+    renderSidebar(e.target.value);
+  }
+});
+
+// FILTERS (FIXED - NO SETTIMEOUT)
+document.addEventListener("change", (e) => {
+  if (e.target.closest("#filters")) {
+    renderMarkers();
+    renderSidebar(document.getElementById("search").value);
+  }
+});
+
+// ==========================
+// INIT
+// ==========================
+fetch("labs.json")
+  .then(r => r.json())
+  .then(data => {
+    labs = data;
+    renderMarkers();
+    renderSidebar("");
+  });
+
+</script>
+
+</body>
+</html>
